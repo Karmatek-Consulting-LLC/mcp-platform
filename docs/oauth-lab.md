@@ -8,9 +8,23 @@ Conventions:
 
 ```bash
 export RH="https://roundhouse.karmatek.io"   # your MCP_BASE_URL
-export PAT="<your dashboard token>"           # superadmin personal access token
 jq --version                                  # you'll want jq
 ```
+
+There is no separate "create a PAT" step — the dashboard login token IS the
+personal access token (`{id}|{hex}`; the server stores only its sha256). Mint
+one with the seeded superadmin credentials:
+
+```bash
+export PAT=$(curl -s -X POST $RH/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"<admin-email>","password":"<admin-password>"}' | jq -r .access_token)
+```
+
+Or, after any dashboard login (password or SSO), copy it from the browser:
+DevTools console → `localStorage.getItem("token")`. Either way it must belong
+to a **superadmin** — the dev-mint, client-admin, and assertion-profile
+endpoints in these labs are superadmin-gated.
 
 A JWT decoder you'll use constantly (claims only; **decoding is not verifying**):
 
