@@ -29,8 +29,17 @@ endpoints in these labs are superadmin-gated.
 A JWT decoder you'll use constantly (claims only; **decoding is not verifying**):
 
 ```bash
-jwt() { cut -d. -f2 <<<"$1" | tr '_-' '/+' | base64 -d 2>/dev/null | jq .; }
+jwt() {
+  local p; p=$(cut -d. -f2 <<<"$1" | tr '_-' '/+')
+  while [ $(( ${#p} % 4 )) -ne 0 ]; do p="$p="; done
+  base64 -d <<<"$p" 2>/dev/null | jq .
+}
 ```
+
+(The padding loop matters: JWT segments are base64url *without* padding, and
+macOS `base64 -d` rejects unpadded input — you'd see a jq "Unfinished JSON
+term" error on roughly half of all tokens, whenever the segment length isn't
+a multiple of 4.)
 
 ---
 
