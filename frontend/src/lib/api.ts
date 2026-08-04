@@ -597,6 +597,20 @@ export interface SsoConfig {
   enabled: boolean;
 }
 
+export interface OAuthClientInfo {
+  client_id: string;
+  client_name: string;
+  /** "none" = public client (PKCE only); anything else holds a secret. */
+  token_endpoint_auth_method: string;
+  redirect_uris: string[];
+  grant_types: string[];
+  /** How the client came to exist: manual (admin), dcr, or cimd. */
+  registration_type: string;
+  /** Admin blessing: unlocks the jwt-bearer (identity assertion) grant. */
+  trusted: boolean;
+  created_at: string | null;
+}
+
 export interface TokenResponse {
   access_token: string;
   token_type: string;
@@ -1146,6 +1160,26 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  // OAuth AS client registry (superadmin only). Manual registrations here are
+  // the admin blessing; DCR/CIMD clients self-register through /oauth and are
+  // never trusted.
+  listOAuthClients: () => request<OAuthClientInfo[]>("/oauth/clients"),
+  createOAuthClient: (body: {
+    client_name: string;
+    trusted: boolean;
+    confidential: boolean;
+    redirect_uris: string[];
+  }) =>
+    request<OAuthClientInfo & { client_secret?: string }>("/oauth/clients", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteOAuthClient: (clientId: string) =>
+    request<{ deleted: string }>(
+      `/oauth/clients/${encodeURIComponent(clientId)}`,
+      { method: "DELETE" },
+    ),
 
   // SSO role mappings (superadmin only)
   listRoleMappings: () => request<RoleMapping[]>("/role-mappings"),

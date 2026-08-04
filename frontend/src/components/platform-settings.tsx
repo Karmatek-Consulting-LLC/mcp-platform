@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { EnvVarsEditor } from "@/components/env-vars-editor";
 import { SsoSettingsCard } from "@/components/sso-settings";
+import { OAuthClientsCard } from "@/components/oauth-clients";
 import type { EnvVar, TlsCertStatus } from "@/lib/api";
 import { ArrowLeft, Boxes, Container, Globe, KeyRound, Lock, Save, Shield, Trash2, Variable } from "lucide-react";
 
@@ -332,6 +333,8 @@ export function PlatformSettings({ onBack }: PlatformSettingsProps) {
       <h2 className="text-2xl font-semibold tracking-tight">Platform Settings</h2>
 
       <SsoSettingsCard />
+
+      <OAuthClientsCard />
 
       <Card>
         <CardHeader>

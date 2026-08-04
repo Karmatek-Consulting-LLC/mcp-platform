@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record as audit_record
 from app.db import get_db
 from app.deps import require_superadmin
 from app.models import OAuthClient, Server, User
@@ -63,7 +64,7 @@ class ClientCreate(BaseModel):
 
 @router.post("/clients")
 def create_client(payload: ClientCreate, db: Session = Depends(get_db),
-                  _: User = Depends(require_superadmin)) -> dict:
+                  admin: User = Depends(require_superadmin)) -> dict:
     client, secret = create_manual_client(
         db,
         client_name=payload.client_name,
@@ -72,6 +73,8 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db),
         redirect_uris=payload.redirect_uris,
         grant_types=payload.grant_types,
     )
+    audit_record(db, admin, "oauth_client.create", "oauth_client",
+                 f"{client.client_id} trusted={client.trusted}")
     out = _client_out(client)
     if secret:
         out["client_secret"] = secret  # once, at creation — only the hash is stored
@@ -80,11 +83,15 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db),
 
 @router.delete("/clients/{client_id:path}")
 def delete_client(client_id: str, db: Session = Depends(get_db),
-                  _: User = Depends(require_superadmin)) -> dict:
+                  admin: User = Depends(require_superadmin)) -> dict:
     row = db.get(OAuthClient, client_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Unknown client")
     db.delete(row)
+    # Deleting the row is revocation-at-issuance: the token endpoint can no
+    # longer resolve the client, so refresh and new grants die immediately;
+    # outstanding access tokens ride out their <=1h TTL (ADR: revocation = TTL).
+    audit_record(db, admin, "oauth_client.delete", "oauth_client", client_id)
     return {"deleted": client_id}
 
 
