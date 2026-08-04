@@ -126,3 +126,33 @@ def test_ingest_capture_emitted_for_proxy_servers():
     src = codegen.generate_proxy_py(spec, format_output=False)
     assert "_ingest_enqueue" in src
     assert "_INGEST_QUEUE" in src
+
+
+def test_generated_server_builds_http_app_with_multiauth():
+    """Regression: _RhMultiVerifier.__init__ must chain TokenVerifier.__init__.
+
+    FastMCP's create_streamable_http_app reads auth.resource_base_url at
+    startup, and TokenVerifier only sets it in __init__ — an override that
+    skips super().__init__() crash-loops every generated container on boot
+    (found live on v0.4.0-rc.2: AttributeError before the first request).
+    """
+    spec = ServerSpec(
+        name="network",
+        primitives=[
+            {"kind": "tool", "name": "list_devices", "scopes": ["read"], "code": "return 1"},
+        ],
+        tokens=[{"name": "client-a", "token": "mcps_x", "scopes": ["read"]}],
+    )
+    ns = _exec(codegen.generate_server_py(spec, format_output=False))
+
+    # The boot path that crashed: composing the Starlette app from mcp + auth.
+    app = ns["mcp"].http_app(stateless_http=True, json_response=True)
+    assert app is not None
+
+    # The MultiAuth chain still verifies: static leg accepts, garbage refused.
+    import asyncio
+
+    chain = ns["mcp"].auth
+    tok = asyncio.run(chain.verify_token("mcps_x"))
+    assert tok is not None and "read" in tok.scopes
+    assert asyncio.run(chain.verify_token("not-a-token")) is None
