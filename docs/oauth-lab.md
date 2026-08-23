@@ -20,6 +20,135 @@ jwt() { cut -d. -f2 <<<"$1" | tr '_-' '/+' | base64 -d 2>/dev/null | jq .; }
 
 ---
 
+## Lab 0 — wire up the Entra tenant (one-time, `az` cli)
+
+Everything below assumes Entra is the upstream IdP. Two app registrations are
+needed, and it pays to understand *why two*:
+
+| registration | plays the part of | client type | who validates its tokens |
+|---|---|---|---|
+| **Roundhouse** | the platform itself: dashboard SSO **and** the AS's federated login leg (`/oauth/entra/start` → `/oauth/entra/callback`) | confidential web app (client secret) | Roundhouse's OIDC client (`app/services/oidc.py`) |
+| **Test Harness** | a generic agent harness (Valkyrie, Claude Code, …). Its Entra `id_token` is the RFC 7523 assertion in Lab 3 | public client (device code / PKCE) | Roundhouse's token endpoint, via the `entra-id-token` assertion profile whose `audience` = this app's client id |
+
+Roundhouse deliberately uses Entra **app roles** (the `roles` claim), not
+group claims — see `docs/entra-sso-plan.md` §2 for the >200-group overage
+reason. The app roles are mapped to Roundhouse roles/teams in the dashboard
+(Settings → Entra ID SSO → Role mappings); nothing in Entra is tied to MCP
+*scopes* directly. The chain is: app role → Roundhouse role + team membership →
+server access (`can_access`: superadmin, owner, or teammate of the owner) →
+all of that server's registered scopes. That is the scope projection today;
+per-role scope subsets are the "Phase 2 engine" seam in `claim_mapping.py`.
+
+### 0.1 The Roundhouse app (SSO + AS federation)
+
+```bash
+TENANT=$(az account show --query tenantId -o tsv)
+RH="https://roundhouse.karmatek.io"   # your MCP_BASE_URL
+
+cat > rh-app.json <<EOF
+{
+  "displayName": "Roundhouse (lab)",
+  "signInAudience": "AzureADMyOrg",
+  "web": {"redirectUris": [
+      "$RH/api/auth/oidc/callback",
+      "$RH/oauth/entra/callback",
+      "http://localhost:8000/api/auth/oidc/callback",
+      "http://localhost:8000/oauth/entra/callback"]},
+  "appRoles": [
+    {"id": "$(uuidgen | tr A-Z a-z)", "allowedMemberTypes": ["User"], "isEnabled": true,
+     "displayName": "Roundhouse Admin", "description": "platform superadmin", "value": "Roundhouse.Admin"},
+    {"id": "$(uuidgen | tr A-Z a-z)", "allowedMemberTypes": ["User"], "isEnabled": true,
+     "displayName": "Roundhouse User",  "description": "standard user",      "value": "Roundhouse.User"}],
+  "optionalClaims": {"idToken": [{"name": "email"}, {"name": "preferred_username"}]},
+  "requiredResourceAccess": [{"resourceAppId": "00000003-0000-0000-c000-000000000000",
+    "resourceAccess": [
+      {"id": "37f7f235-527c-4136-accd-4a02d197296e", "type": "Scope"},
+      {"id": "14dad69e-099b-42c9-810b-d002981feec1", "type": "Scope"},
+      {"id": "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0", "type": "Scope"}]}]
+}
+EOF
+# (those three Graph scope ids are openid / profile / email)
+az rest -m POST -u https://graph.microsoft.com/v1.0/applications -b @rh-app.json > rh-app.out.json
+APP_OBJ=$(jq -r .id rh-app.out.json); RH_CLIENT_ID=$(jq -r .appId rh-app.out.json)
+
+# Client secret — the value is returned ONCE. Store it; it goes into the dashboard.
+az rest -m POST -u "https://graph.microsoft.com/v1.0/applications/$APP_OBJ/addPassword" \
+  -b '{"passwordCredential":{"displayName":"roundhouse","endDateTime":"2027-08-23T00:00:00Z"}}' \
+  | jq -r .secretText
+
+# Service principal (the "Enterprise application") + assign yourself the admin app role
+SP=$(az ad sp create --id $RH_CLIENT_ID --query id -o tsv)
+ME=$(az ad signed-in-user show --query id -o tsv)
+ADMIN_ROLE=$(jq -r '.appRoles[] | select(.value=="Roundhouse.Admin") | .id' rh-app.out.json)
+az rest -m POST -u "https://graph.microsoft.com/v1.0/users/$ME/appRoleAssignments" \
+  -b "{\"principalId\":\"$ME\",\"resourceId\":\"$SP\",\"appRoleId\":\"$ADMIN_ROLE\"}"
+```
+
+Then in Roundhouse: **Settings → Entra ID SSO → Connection**: tenant id,
+`$RH_CLIENT_ID`, the secret. **Role mappings**: `Roundhouse.Admin` →
+superadmin, `Roundhouse.User` → user (+ a team if you want team-scoped
+server access). Sign in with Microsoft once — that JIT-provisions your Entra
+user (the token endpoint never provisions; Lab 3 needs the user to exist).
+
+### 0.2 The harness app (the assertion issuer for Lab 3)
+
+```bash
+cat > harness-app.json <<'EOF'
+{
+  "displayName": "Roundhouse Test Harness (lab)",
+  "signInAudience": "AzureADMyOrg",
+  "isFallbackPublicClient": true,
+  "publicClient": {"redirectUris": ["http://localhost:8765/callback"]},
+  "optionalClaims": {"idToken": [{"name": "email"}, {"name": "preferred_username"}]},
+  "requiredResourceAccess": [{"resourceAppId": "00000003-0000-0000-c000-000000000000",
+    "resourceAccess": [
+      {"id": "37f7f235-527c-4136-accd-4a02d197296e", "type": "Scope"},
+      {"id": "14dad69e-099b-42c9-810b-d002981feec1", "type": "Scope"},
+      {"id": "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0", "type": "Scope"}]}]
+}
+EOF
+az rest -m POST -u https://graph.microsoft.com/v1.0/applications -b @harness-app.json > harness-app.out.json
+HARNESS_CLIENT_ID=$(jq -r .appId harness-app.out.json)
+az ad sp create --id $HARNESS_CLIENT_ID --query id -o tsv
+```
+
+`isFallbackPublicClient: true` is the portal's "Allow public client flows" —
+it is what lets the **device-code** grant work, which is the easiest way to
+get a real Entra `id_token` with nothing but curl (3.3 below).
+
+### 0.3 Watch an Entra id_token get minted (device code, by hand)
+
+```bash
+TENANT=$(az account show --query tenantId -o tsv)
+curl -s -X POST "https://login.microsoftonline.com/$TENANT/oauth2/v2.0/devicecode" \
+  -d "client_id=$HARNESS_CLIENT_ID" -d "scope=openid profile email" | tee dc.json | jq .message
+# -> "To sign in, use a web browser to open https://microsoft.com/devicelogin and enter the code …"
+# Do that in a browser, then poll:
+curl -s -X POST "https://login.microsoftonline.com/$TENANT/oauth2/v2.0/token" \
+  -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+  -d "client_id=$HARNESS_CLIENT_ID" -d "device_code=$(jq -r .device_code dc.json)" | tee tok.json | jq 'keys'
+# ("authorization_pending" until you finish the browser step — poll every `interval` seconds)
+export ENTRA_ID_TOKEN=$(jq -r .id_token tok.json)
+jwt "$ENTRA_ID_TOKEN"
+```
+
+Read the claims: `iss` is `https://login.microsoftonline.com/<tenant>/v2.0`,
+`aud` is the **harness** app id (not Roundhouse's), `sub` is an opaque
+*pairwise* id — different for every app registration — and
+`preferred_username` is your UPN. Two consequences for Lab 3:
+
+- The assertion profile's `audience` must be `$HARNESS_CLIENT_ID`. Present an
+  id_token from the *Roundhouse* app instead and the token endpoint refuses
+  it (`invalid_grant`, aud mismatch) — correct: that token was issued to a
+  different client.
+- Roundhouse stores the user's `sub` from the **Roundhouse** app, so the
+  harness assertion's `sub` will not match; the token endpoint falls back to
+  matching `preferred_username`/`email` against the user table
+  (`oauth_assertions._resolve_user`). Cross-app identity is by email in the
+  interim.
+
+---
+
 ## Lab 1 — the token plane (no OAuth flows yet)
 
 Slice 1 exists so you can see audience binding and scope gates work before any
@@ -121,14 +250,14 @@ configured, only the audience (the harness's own Entra app client id) is new:
 ```bash
 curl -s -X PUT $RH/api/oauth/assertion-profiles -H "Authorization: Bearer $PAT" \
   -H 'content-type: application/json' \
-  -d '{"profiles": [{"name": "entra-id-token", "enabled": true,
-       "audience": "<valkyrie-entra-app-client-id>"}]}' | jq .
+  -d "{\"profiles\": [{\"name\": \"entra-id-token\", \"enabled\": true,
+       \"audience\": \"$HARNESS_CLIENT_ID\"}]}" | jq .
 ```
 
 ### 3.3 The exchange — one back-channel POST
 
-Get a real Entra id_token for a user of the harness's Entra app (e.g. from the
-harness's own login, or `az` tooling against that app registration), then:
+Get a real Entra id_token for a user of the harness's Entra app — Lab 0.3's
+device-code flow puts one in `$ENTRA_ID_TOKEN` — then:
 
 ```bash
 curl -s -X POST $RH/oauth/token -u "$CID:$CSEC" \
