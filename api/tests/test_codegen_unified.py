@@ -218,7 +218,7 @@ def test_dockerfile_alpine_base_uses_apk_not_apt():
     assert "apt-get" not in df
 
 
-def test_dockerfile_alpine_ca_uses_apk_ca_certificates():
+def test_dockerfile_alpine_ca_appends_without_apk_fetch():
     spec = ServerSpec(name="s", primitives=[{"kind": "tool", "name": "t", "code": "return 'ok'"}])
     df = codegen.generate_dockerfile(
         spec,
@@ -226,8 +226,12 @@ def test_dockerfile_alpine_ca_uses_apk_ca_certificates():
         build_image="dhi.io/python:3.14-alpine3.24-dev",
         runtime_image="dhi.io/python:3.14-alpine3.24",
     )
-    assert "apk add --no-cache ca-certificates" in df
-    assert "update-ca-certificates" in df
+    # The CA is appended to the existing bundle directly: fetching ca-certificates
+    # first would fail behind a TLS-inspecting proxy (proxy CA not trusted yet),
+    # and DHI Alpine has no update-ca-certificates.
+    assert "cat /usr/local/share/ca-certificates/custom-ca.crt >> /etc/ssl/certs/ca-certificates.crt" in df
+    assert "apk add --no-cache ca-certificates" not in df
+    assert "update-ca-certificates" not in df
     # Runtime still carries the combined bundle + trust env.
     assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in df
 
