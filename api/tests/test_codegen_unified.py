@@ -191,6 +191,13 @@ def test_dockerfile_custom_ca_carried_into_runtime():
     assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in df
 
 
+def test_dockerfile_strips_pip_from_runtime_venv():
+    # pip is build-only; its vendored bundle carries CVE-flagged setuptools/msgpack.
+    spec = ServerSpec(name="s", primitives=[{"kind": "tool", "name": "t", "code": "return 'ok'"}])
+    df = codegen.generate_dockerfile(spec)
+    assert "python -m pip uninstall -y pip" in df
+
+
 def test_dockerfile_apt_packages_install_in_build_stage_only():
     spec = ServerSpec(
         name="s",
