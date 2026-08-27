@@ -968,15 +968,15 @@ def generate_dockerfile(
     lines.append("WORKDIR /app")
     if has_ca:
         # Append the corp CA to the trust bundle before any network call so pip
-        # (and any build-time fetch) trusts a TLS-inspecting proxy. Alpine needs
-        # the ca-certificates package for update-ca-certificates + the bundle.
+        # (and any build-time fetch, incl. apk) trusts a TLS-inspecting proxy.
+        # DHI Alpine ships the bundle (cert.pem -> certs/ca-certificates.crt) but
+        # no cert tooling; fetching ca-certificates first would fail because the
+        # proxy CA isn't trusted yet, so append directly rather than apk-adding.
         lines.append("COPY custom-ca.crt /usr/local/share/ca-certificates/custom-ca.crt")
         if alpine:
-            lines.append("RUN apk add --no-cache ca-certificates \\")
             lines.append(
-                "    && cat /usr/local/share/ca-certificates/custom-ca.crt >> /etc/ssl/certs/ca-certificates.crt \\"
+                "RUN cat /usr/local/share/ca-certificates/custom-ca.crt >> /etc/ssl/certs/ca-certificates.crt"
             )
-            lines.append("    && update-ca-certificates")
         else:
             lines.append(
                 "RUN cat /usr/local/share/ca-certificates/custom-ca.crt >> /etc/ssl/certs/ca-certificates.crt \\"
