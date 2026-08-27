@@ -1002,7 +1002,12 @@ def generate_dockerfile(
     pip_install = f"fastmcp=={FASTMCP_VERSION}"
     if spec.pip_packages:
         pip_install += " " + " ".join(spec.pip_packages)
-    lines.append(f"RUN pip install --no-cache-dir {pip_install}")
+    # Drop pip after installing: it is build-only, and its vendored bundle
+    # (pip/_vendor) ships frozen, CVE-bearing copies of setuptools/msgpack that
+    # scanners flag even though the runtime never uses them. The runtime only
+    # runs python, so removing pip from the copied venv keeps the image clean.
+    lines.append(f"RUN pip install --no-cache-dir {pip_install} \\")
+    lines.append("    && python -m pip uninstall -y pip")
     lines.append("")
 
     # ---- Runtime stage: non-root, distroless (no shell / pip / apt) ----
