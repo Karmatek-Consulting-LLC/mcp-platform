@@ -539,6 +539,29 @@ def test_jwt_bearer_unknown_subject_rejected(client, db, server, fake_idp, valky
     assert r.status_code == 400 and "not a Roundhouse user" in r.json()["error_description"]
 
 
+def test_jwt_bearer_unknown_server_is_invalid_target(client, db, fake_idp, valkyrie,
+                                                     alice, admin):
+    """Found on the lab: a superadmin subject + a resource naming a server that
+    doesn't exist got a 200 and a scope-less token (can_access short-circuits
+    for superadmins before any server lookup). Must be invalid_target."""
+    from app.services.oauth_tokens import allowed_scopes_for
+
+    assert allowed_scopes_for(db, admin, "does-not-exist") is None
+
+    cid, secret = valkyrie
+    r = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": _entra_id_token(fake_idp),
+            "resource": f"{_base()}/s/does-not-exist/mcp",
+        },
+        auth=(cid, secret),
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["error"] == "invalid_target"
+
+
 def test_id_jag_profile_single_use(client, db, server, monkeypatch, idp_key,
                                    valkyrie, alice):
     """The future profile, exercised today: typ-checked, aud = our issuer,

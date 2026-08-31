@@ -107,6 +107,9 @@ class ProfilesUpdate(BaseModel):
 def put_assertion_profiles(payload: ProfilesUpdate, db: Session = Depends(get_db),
                            _: User = Depends(require_superadmin)) -> dict:
     put_setting(db, SETTING_OAUTH_ASSERTION_PROFILES, json.dumps(payload.profiles))
+    # A first-time PUT adds a pending row; flush so the echo below reads what
+    # was just written rather than the pre-PUT default (seen on the lab).
+    db.flush()
     from app.services.oauth_assertions import load_profiles
 
     return {"effective": [p.__dict__ for p in load_profiles(db)]}

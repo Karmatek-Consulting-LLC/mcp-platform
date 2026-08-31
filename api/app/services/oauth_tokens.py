@@ -25,7 +25,7 @@ from authlib.jose.errors import JoseError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import ServerScope, User
+from app.models import Server, ServerScope, User
 from app.services import oauth_keys
 from app.services.permissions import can_access
 
@@ -70,9 +70,20 @@ def registered_scopes(db: Session, server_name: str) -> list[str]:
     return [r.name for r in rows]
 
 
+def server_exists(db: Session, server_name: str) -> bool:
+    return db.get(Server, server_name) is not None
+
+
 def allowed_scopes_for(db: Session, user: User, server_name: str) -> list[str] | None:
     """The scope set this user may be issued on this server, or None when the
-    user may not access the server at all. Default-all (see module docstring)."""
+    user may not access the server at all. Default-all (see module docstring).
+
+    A server that doesn't exist is never accessible — checked here, not only in
+    can_access, because superadmins short-circuit that function before it looks
+    the server up. Without this a superadmin could be issued a (scope-less)
+    token whose aud names a server that may be created later."""
+    if not server_exists(db, server_name):
+        return None
     if not can_access(db, user, server_name):
         return None
     return registered_scopes(db, server_name)

@@ -257,7 +257,7 @@ def _authorize_continue(request: Request, db: Session, p: dict):
                              "code_challenge_method must be S256")
 
     server = oauth_tokens.server_name_from_resource(p.get("resource") or "")
-    if not server:
+    if not server or not oauth_tokens.server_exists(db, server):
         return _redirect_err(
             redirect_uri, state, "invalid_target",
             "resource must name one MCP server on this platform, e.g. "
@@ -359,7 +359,7 @@ def _authorize_continue_with_session(request: Request, db: Session, p: dict,
     if not oauth_clients.redirect_uri_allowed(client, redirect_uri):
         return _error_page("redirect_uri is not registered for this client.")
     server = oauth_tokens.server_name_from_resource(p.get("resource") or "")
-    if not server:
+    if not server or not oauth_tokens.server_exists(db, server):
         return _redirect_err(redirect_uri, p.get("state") or "", "invalid_target",
                              "resource must name one MCP server")
     allowed = oauth_tokens.allowed_scopes_for(db, user, server)
@@ -664,7 +664,7 @@ def _grant_jwt_bearer(request: Request, db: Session, client, form: dict):
     if not assertion:
         return _token_error("invalid_request", "assertion is required")
     server = oauth_tokens.server_name_from_resource(form.get("resource") or "")
-    if not server:
+    if not server or not oauth_tokens.server_exists(db, server):
         return _token_error(
             "invalid_target",
             "resource must name one MCP server, e.g. "

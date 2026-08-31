@@ -147,6 +147,39 @@ Read the claims: `iss` is `https://login.microsoftonline.com/<tenant>/v2.0`,
   (`oauth_assertions._resolve_user`). Cross-app identity is by email in the
   interim.
 
+### 0.4 Headless alternative — an Entra-signed token straight from `az`
+
+Device code needs a browser once. For scripted runs (CI, an agent testing
+itself) let the harness app *expose an API* and pre-authorize the Azure CLI's
+first-party client for it; then `az account get-access-token` returns a v2.0
+**access** token whose `aud` is the harness app — which is all the
+`entra-id-token` profile checks (signature, `iss`, `aud`, `exp`, then
+`preferred_username`/`email` for user resolution):
+
+```bash
+cat > harness-api.json <<EOF
+{"identifierUris": ["api://$HARNESS_CLIENT_ID"],
+ "api": {"requestedAccessTokenVersion": 2,
+         "oauth2PermissionScopes": [{"id": "$(uuidgen | tr A-Z a-z)", "value": "access_as_user",
+           "type": "User", "isEnabled": true,
+           "adminConsentDisplayName": "Access harness as user",
+           "adminConsentDescription": "Lab: az CLI obtains a harness token used as the RFC 7523 assertion"}]}}
+EOF
+HARNESS_OBJ=$(jq -r .id harness-app.out.json)
+az rest -m PATCH -u "https://graph.microsoft.com/v1.0/applications/$HARNESS_OBJ" -b @harness-api.json
+SCOPE_ID=$(jq -r '.api.oauth2PermissionScopes[0].id' harness-api.json)
+# 04b07795-… is the Azure CLI's own app id; pre-authorizing it skips the consent prompt
+az rest -m PATCH -u "https://graph.microsoft.com/v1.0/applications/$HARNESS_OBJ" \
+  -b "{\"api\":{\"preAuthorizedApplications\":[{\"appId\":\"04b07795-8ddb-461a-bbee-02f9e1bf7b46\",\"delegatedPermissionIds\":[\"$SCOPE_ID\"]}]}}"
+
+export ENTRA_ID_TOKEN=$(az account get-access-token --scope "api://$HARNESS_CLIENT_ID/access_as_user" --query accessToken -o tsv)
+jwt "$ENTRA_ID_TOKEN"   # aud = harness app, iss = …/v2.0, azp = the az CLI, preferred_username = you
+```
+
+It is an access token rather than an id_token, but RFC 7523 doesn't care and
+neither does the profile: what matters is that Entra signed a JWT *for the
+harness app* naming the user. Lab 3.3 runs unchanged with it.
+
 ---
 
 ## Lab 1 — the token plane (no OAuth flows yet)
