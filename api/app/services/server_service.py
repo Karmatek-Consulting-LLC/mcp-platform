@@ -234,16 +234,23 @@ class ServerService:
             return None
         return {"username": username, "password": password}
 
-    def effective_base_images(self, db: Session) -> tuple[str, str]:
-        """(build_image, runtime_image) for generated servers: the UI-configured
-        platform settings when set, else the MCP_SERVER_*_IMAGE env defaults."""
+    def effective_base_images(
+        self, db: Session, spec: "ServerSpec | None" = None
+    ) -> tuple[str, str]:
+        """(build_image, runtime_image) for a generated server build. Precedence:
+        per-server spec override > UI-configured platform setting > the
+        MCP_SERVER_*_IMAGE env defaults."""
         cfg = get_settings()
         build = (get_setting(db, SETTING_MCP_BASE_BUILD_IMAGE, "") or "").strip()
         runtime = (get_setting(db, SETTING_MCP_BASE_RUNTIME_IMAGE, "") or "").strip()
-        return (
-            build or cfg.mcp_server_build_image,
-            runtime or cfg.mcp_server_runtime_image,
-        )
+        eff_build = build or cfg.mcp_server_build_image
+        eff_runtime = runtime or cfg.mcp_server_runtime_image
+        if spec is not None:
+            if spec.build_image:
+                eff_build = spec.build_image
+            if spec.runtime_image:
+                eff_runtime = spec.runtime_image
+        return eff_build, eff_runtime
 
     def base_registry_auth(self, db: Session) -> dict[str, dict[str, str]] | None:
         """Credentials for PULLING the base images at build time, as a map of
@@ -345,7 +352,7 @@ class ServerService:
             spec,
             self.store,
             self.custom_ca_cert(db),
-            *self.effective_base_images(db),
+            *self.effective_base_images(db, spec),
         ) as ctx:
             result = self.docker.build_and_start(
                 server_name=spec.name,

@@ -516,6 +516,9 @@ export interface Server {
   pip_packages: string[];
   /** OS-level (apt) packages installed into the container image before pip. */
   apt_packages: string[];
+  /** Per-server base-image overrides (null/absent = use the platform default). */
+  build_image?: string | null;
+  runtime_image?: string | null;
   env_global_imports?: string[];
   env_vars: EnvVar[];
   /** Platform-wide catalog for picking global imports. */
@@ -1025,6 +1028,11 @@ export const api = {
     request<Server>(`/servers/${serverName}/apt-packages`, {
       method: "PUT",
       body: JSON.stringify({ apt_packages }),
+    }),
+  updateBaseImages: (serverName: string, build_image: string, runtime_image: string) =>
+    request<Server>(`/servers/${serverName}/base-images`, {
+      method: "PUT",
+      body: JSON.stringify({ build_image, runtime_image }),
     }),
   updateEnvVars: (serverName: string, cfg: ServerEnvConfig) =>
     request<Server>(`/servers/${serverName}/env`, {

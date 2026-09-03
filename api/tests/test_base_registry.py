@@ -86,6 +86,43 @@ def test_effective_base_images_uses_db_override(db):
     assert runtime == "myorg/python:3.14"
 
 
+def test_effective_base_images_per_server_override_beats_platform(db):
+    from app.services.spec import ServerSpec
+
+    put_setting(db, SETTING_MCP_BASE_BUILD_IMAGE, "myorg/python:3.14-dev")
+    put_setting(db, SETTING_MCP_BASE_RUNTIME_IMAGE, "myorg/python:3.14")
+    spec = ServerSpec(
+        name="s",
+        build_image="repo/dhi-python:fips-dev-vaca",
+        runtime_image="repo/dhi-python:fips-mssql",
+    )
+    build, runtime = _service().effective_base_images(db, spec)
+    assert build == "repo/dhi-python:fips-dev-vaca"
+    assert runtime == "repo/dhi-python:fips-mssql"
+
+
+def test_effective_base_images_per_server_partial_override_falls_back(db):
+    from app.services.spec import ServerSpec
+
+    # Only the runtime is overridden; build falls back to the env default.
+    spec = ServerSpec(name="s", runtime_image="repo/dhi-python:fips-mssql")
+    build, runtime = _service().effective_base_images(db, spec)
+    assert build == "python:3.14-slim"
+    assert runtime == "repo/dhi-python:fips-mssql"
+
+
+def test_spec_roundtrips_base_image_overrides():
+    from app.services.spec import ServerSpec
+
+    spec = ServerSpec(name="s", build_image="a:1", runtime_image="b:2")
+    d = spec.to_dict()
+    assert d["build_image"] == "a:1" and d["runtime_image"] == "b:2"
+    back = ServerSpec.from_dict(d)
+    assert back.build_image == "a:1" and back.runtime_image == "b:2"
+    # Empty string normalizes to None (no override).
+    assert ServerSpec.from_dict({"name": "s", "build_image": ""}).build_image is None
+
+
 # ---- base_registry_auth ----
 
 def test_base_registry_auth_none_when_unconfigured(db):
