@@ -367,9 +367,33 @@ function AptPackagesRail({ serverName, server, onSaved }: RailProps) {
   // against — so the rail can tell users which distro's names to enter.
   const [buildInfo, setBuildInfo] = useState<ServerBuildInfo | null>(null);
 
+  // Per-server base-image override (advanced). Independent local state so it
+  // saves separately from the apt-package list above.
+  const [buildImg, setBuildImg] = useState(server.build_image ?? "");
+  const [runtimeImg, setRuntimeImg] = useState(server.runtime_image ?? "");
+  const [savingImg, setSavingImg] = useState(false);
+  const [imgErr, setImgErr] = useState<string | null>(null);
+  const imgDirty =
+    buildImg !== (server.build_image ?? "") || runtimeImg !== (server.runtime_image ?? "");
+
+  async function saveImages() {
+    setImgErr(null);
+    setSavingImg(true);
+    try {
+      await api.updateServerBaseImages(serverName, buildImg.trim(), runtimeImg.trim());
+      onSaved();
+    } catch (e) {
+      setImgErr(e instanceof Error ? e.message : "Failed to save base images");
+    } finally {
+      setSavingImg(false);
+    }
+  }
+
+  // Per-server so the apt-vs-apk hint reflects this server's override, and
+  // re-fetched when the override changes (onSaved reloads the server).
   useEffect(() => {
-    api.getServerBuildInfo().then(setBuildInfo).catch(() => setBuildInfo(null));
-  }, []);
+    api.getServerBuildInfo(serverName).then(setBuildInfo).catch(() => setBuildInfo(null));
+  }, [serverName, server.build_image, server.runtime_image]);
 
   async function save() {
     setError(null);
@@ -392,6 +416,39 @@ function AptPackagesRail({ serverName, server, onSaved }: RailProps) {
         <AptPackageManager packages={value} onChange={setValue} buildInfo={buildInfo} />
       </div>
       <SaveBar dirty={dirty} saving={saving} onSave={save} onReset={reset} error={error} />
+      <div className="mt-6 border-t border-border pt-4">
+        <RailHeader>Base image override (advanced)</RailHeader>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Leave blank to use the platform default. Set only for servers that need
+          runtime system libraries the shared hardened base doesn't carry (e.g. a
+          SQL Server ODBC/Kerberos base). The build image needs a shell + package
+          manager; the runtime image is what the server runs on.
+        </p>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="override-build-image">Build image</Label>
+            <Input
+              id="override-build-image"
+              value={buildImg}
+              onChange={(e) => setBuildImg(e.target.value)}
+              placeholder="(platform default)"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="override-runtime-image">Runtime image</Label>
+            <Input
+              id="override-runtime-image"
+              value={runtimeImg}
+              onChange={(e) => setRuntimeImg(e.target.value)}
+              placeholder="(platform default)"
+            />
+          </div>
+          {imgErr && <p className="text-xs text-destructive">{imgErr}</p>}
+          <Button size="sm" disabled={!imgDirty || savingImg} onClick={saveImages}>
+            {savingImg ? "Saving..." : "Save base images"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

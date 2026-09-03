@@ -137,6 +137,13 @@ class ServerSpec:
     mode: str = MODE_STRUCTURED
     source: str | None = None
     apt_packages: list[str] = field(default_factory=list)
+    # Optional per-server base-image overrides. When set, they take precedence
+    # over the platform-wide MCP_SERVER_*_IMAGE settings for THIS server's build
+    # only. For servers that need extra runtime system libs the shared hardened
+    # base doesn't carry (e.g. a SQL Server ODBC/Kerberos base). None = use the
+    # platform default.
+    build_image: str | None = None
+    runtime_image: str | None = None
     middleware_defaults: dict = field(default_factory=dict)
     # None = no cap (Docker default). cpu_limit is whole CPUs (0.5 = half).
     cpu_limit: float | None = None
@@ -228,6 +235,8 @@ class ServerSpec:
             mode=mode,
             source=source,
             apt_packages=_string_list(data.get("apt_packages", [])),
+            build_image=(str(data.get("build_image") or "").strip() or None),
+            runtime_image=(str(data.get("runtime_image") or "").strip() or None),
             middleware_defaults=mw_defaults,
             cpu_limit=_opt_float(data.get("cpu_limit")),
             memory_limit_mb=_opt_int(data.get("memory_limit_mb")),
@@ -252,6 +261,8 @@ class ServerSpec:
             "mode": self.mode,
             "source": self.source,
             "apt_packages": self.apt_packages,
+            "build_image": self.build_image,
+            "runtime_image": self.runtime_image,
             "middleware_defaults": self.middleware_defaults,
             "cpu_limit": self.cpu_limit,
             "memory_limit_mb": self.memory_limit_mb,

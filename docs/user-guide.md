@@ -203,8 +203,10 @@ installed at build time.
 
 ### APT packages
 
-OS-level packages installed via `apt-get` in the build. Use for native
-toolchains a Python wheel needs.
+OS-level packages installed via `apt-get` (or `apk` on an Alpine base) in
+the build. Use for native toolchains a Python wheel needs. The same tab
+holds the optional per-server *base image override* — see
+[Platform settings](#platform-settings) below.
 
 ![Editor — apt packages](screenshots/dark/17-editor-apt.png)
 
@@ -313,6 +315,16 @@ generated Dockerfile already handles shell-less runtimes. A blank field
 falls back to the env default. When you pick an Alpine base, codegen
 switches OS-package installs from `apt-get` to `apk`, and the server's
 *OS packages* editor tells users which distro's package names to use.
+
+**Per-server base image override.** A single server that needs runtime
+system libraries the shared base doesn't carry (e.g. a SQL Server ODBC +
+Kerberos base) can set its own *build* / *runtime* images under the server
+editor's *OS packages* tab, without changing every other server's image.
+Precedence is per-server override → platform setting → env default; blank
+fields fall back to the platform default, and the *OS packages* hint (apt
+vs apk) follows the override. *Base image registry credentials* are only
+sent to the registries of the platform-wide base images, so an override on
+a different private registry must be anonymously pullable.
 
 **Base image registry credentials.** When the base images live on a private
 registry, enter the pull credentials under *Base image registry

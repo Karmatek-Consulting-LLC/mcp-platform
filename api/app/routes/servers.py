@@ -239,6 +239,9 @@ def _to_response(
         "primitives": spec.primitives if spec else [],
         "pip_packages": spec.pip_packages if spec else [],
         "apt_packages": spec.apt_packages if spec else [],
+        # Per-server base-image overrides (empty = use the platform default).
+        "build_image": (spec.build_image if spec else None),
+        "runtime_image": (spec.runtime_image if spec else None),
         "env_global_imports": spec.env_global_imports if spec else [],
         "env_vars": _env_vars_for_response(spec.env_vars if spec else []),
         "global_env": [v.to_dict() for v in global_env.list_globals(db)],
@@ -315,14 +318,24 @@ def limits(_: User = Depends(current_user)):
 
 
 @router.get("/build-info")
-def build_info(_: User = Depends(current_user), db: Session = Depends(get_db)):
+def build_info(
+    server: str | None = Query(None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
     """Effective base images for generated server builds (env default or the
     Platform Settings override), plus the build image's package ecosystem
     ("debian" -> apt-get, "alpine" -> apk) so the OS-packages UI can tell users
     which distro's package names to use. Any authenticated user may read this -
     image refs are not secrets, and non-admin server owners are the ones
-    entering package names."""
-    build_image, runtime_image = get_server_service().effective_base_images(db)
+    entering package names. Pass `server` to apply that server's per-server
+    base-image override, so the hint matches what its build actually uses."""
+    service = get_server_service()
+    spec = None
+    if server:
+        _assert_access(db, user, server)
+        spec = service.store.load(server)
+    build_image, runtime_image = service.effective_base_images(db, spec)
     return {
         "build_image": build_image,
         "runtime_image": runtime_image,
@@ -1584,6 +1597,36 @@ def update_apt_packages(
     _assert_access(db, user, name)
     spec = _ensure_spec(db, name)
     spec.apt_packages = list(payload.apt_packages)
+    return _save_and_respond(db, spec)
+
+
+class BaseImagesIn(BaseModel):
+    # Empty string clears the override (falls back to the platform-wide base).
+    build_image: str = ""
+    runtime_image: str = ""
+
+
+# Permissive image-ref check: registry[:port]/path[:tag][@digest].
+_IMAGE_REF_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:/@-]*$")
+
+
+@router.put("/{name}/base-images")
+def update_base_images(
+    name: str,
+    payload: BaseImagesIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Per-server build/runtime base-image overrides. For servers that need extra
+    runtime system libs the shared hardened base doesn't carry (e.g. a SQL Server
+    ODBC/Kerberos base). Empty string clears an override -> platform default."""
+    for ref in (payload.build_image, payload.runtime_image):
+        if ref and not _IMAGE_REF_RE.match(ref):
+            raise HTTPException(status_code=422, detail=f"Invalid image reference: {ref}")
+    _assert_access(db, user, name)
+    spec = _ensure_spec(db, name)
+    spec.build_image = payload.build_image.strip() or None
+    spec.runtime_image = payload.runtime_image.strip() or None
     return _save_and_respond(db, spec)
 
 

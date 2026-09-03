@@ -17,6 +17,10 @@ __pycache__/
 # Claude Code session scaffolding (worktrees, job dirs)
 .claude/
 
+# Local agent handoff scratch (contains secrets like keytabs) — never commit.
+platform-handoff/
+*.keytab
+
 # OS
 .DS_Store
 Thumbs.db
