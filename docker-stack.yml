@@ -46,7 +46,9 @@ services:
         constraints:
           - node.role == manager
       restart_policy:
-        condition: on-failure
+        # `any` (not on-failure): a clean exit (exit 0) during a node reboot must
+        # still restart, or the service stays down. See RCA 2026-09-02.
+        condition: any
 
   # Scoped docker API for platform-api - needs POST + BUILD for container/service
   # CRUD and image builds. Still much smaller attack surface than a raw socket mount.
@@ -71,7 +73,7 @@ services:
         constraints:
           - node.role == manager
       restart_policy:
-        condition: on-failure
+        condition: any
 
   traefik:
     image: traefik:v3.6
@@ -93,7 +95,7 @@ services:
       - docker-socket-proxy-traefik
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: any
 
   postgres:
     image: postgres:16-alpine
@@ -114,7 +116,7 @@ services:
       retries: 5
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: any
 
   platform-api:
     image: ghcr.io/karmatek-consulting-llc/roundhouse:latest
@@ -179,7 +181,7 @@ services:
         - "traefik.http.routers.platform-api.rule=Host(`${PUBLIC_HOSTNAME}`) && !PathPrefix(`/s/`)"
         - "traefik.http.services.platform-api.loadbalancer.server.port=8000"
       restart_policy:
-        condition: on-failure
+        condition: any
 
 secrets:
   roundhouse_app_key:
