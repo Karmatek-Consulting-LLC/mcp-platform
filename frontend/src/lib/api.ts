@@ -756,13 +756,18 @@ export const api = {
     }>("/servers/limits"),
   /** Effective base images for generated server builds and the build image's
    * package ecosystem, so the OS-packages UI can say whether names must be
-   * Debian (apt-get) or Alpine (apk) packages. */
-  getServerBuildInfo: () =>
+   * Debian (apt-get) or Alpine (apk) packages. Pass a server name to apply
+   * that server's per-server base-image override. */
+  getServerBuildInfo: (serverName?: string) =>
     request<{
       build_image: string;
       runtime_image: string;
       distro: "debian" | "alpine";
-    }>("/servers/build-info"),
+    }>(
+      serverName
+        ? `/servers/build-info?server=${encodeURIComponent(serverName)}`
+        : "/servers/build-info",
+    ),
   /** Node-label pairs available for Swarm placement selection (derived from
    * actual node labels, not free-form). `supported` is false off Swarm. */
   listNodeLabels: () =>
@@ -1029,7 +1034,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ apt_packages }),
     }),
-  updateBaseImages: (serverName: string, build_image: string, runtime_image: string) =>
+  /** Per-server base-image override (distinct from the platform-wide
+   * `updateBaseImages` under /settings). Empty strings clear the override. */
+  updateServerBaseImages: (serverName: string, build_image: string, runtime_image: string) =>
     request<Server>(`/servers/${serverName}/base-images`, {
       method: "PUT",
       body: JSON.stringify({ build_image, runtime_image }),

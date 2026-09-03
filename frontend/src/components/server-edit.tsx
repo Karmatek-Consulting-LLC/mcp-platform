@@ -380,7 +380,7 @@ function AptPackagesRail({ serverName, server, onSaved }: RailProps) {
     setImgErr(null);
     setSavingImg(true);
     try {
-      await api.updateBaseImages(serverName, buildImg.trim(), runtimeImg.trim());
+      await api.updateServerBaseImages(serverName, buildImg.trim(), runtimeImg.trim());
       onSaved();
     } catch (e) {
       setImgErr(e instanceof Error ? e.message : "Failed to save base images");
@@ -389,9 +389,11 @@ function AptPackagesRail({ serverName, server, onSaved }: RailProps) {
     }
   }
 
+  // Per-server so the apt-vs-apk hint reflects this server's override, and
+  // re-fetched when the override changes (onSaved reloads the server).
   useEffect(() => {
-    api.getServerBuildInfo().then(setBuildInfo).catch(() => setBuildInfo(null));
-  }, []);
+    api.getServerBuildInfo(serverName).then(setBuildInfo).catch(() => setBuildInfo(null));
+  }, [serverName, server.build_image, server.runtime_image]);
 
   async function save() {
     setError(null);

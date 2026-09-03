@@ -318,14 +318,24 @@ def limits(_: User = Depends(current_user)):
 
 
 @router.get("/build-info")
-def build_info(_: User = Depends(current_user), db: Session = Depends(get_db)):
+def build_info(
+    server: str | None = Query(None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
     """Effective base images for generated server builds (env default or the
     Platform Settings override), plus the build image's package ecosystem
     ("debian" -> apt-get, "alpine" -> apk) so the OS-packages UI can tell users
     which distro's package names to use. Any authenticated user may read this -
     image refs are not secrets, and non-admin server owners are the ones
-    entering package names."""
-    build_image, runtime_image = get_server_service().effective_base_images(db)
+    entering package names. Pass `server` to apply that server's per-server
+    base-image override, so the hint matches what its build actually uses."""
+    service = get_server_service()
+    spec = None
+    if server:
+        _assert_access(db, user, server)
+        spec = service.store.load(server)
+    build_image, runtime_image = service.effective_base_images(db, spec)
     return {
         "build_image": build_image,
         "runtime_image": runtime_image,
